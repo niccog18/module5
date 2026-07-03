@@ -1,0 +1,119 @@
+Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+    Explain what FastAPI is and why it has become the dominant Python API framework
+    Identify three key advantages FastAPI has over Flask for modern API development
+    Describe what auto-generated documentation is and why it matters
+    Explain the basic concept of async/await and why it improves API performance
+
+In Module 4, you learned how APIs work — the theory, the verbs, the status codes, the design principles. Now you build one.
+
+The tool you'll use is FastAPI, and it's not just any framework. FastAPI has become the most popular Python web framework for building APIs, overtaking Flask (which dominated for a decade) in just a few years. Understanding why it won will help you appreciate the features you're about to learn.
+
+Think of it this way: Flask is like a blank canvas. It gives you freedom but makes you do everything yourself — validation, documentation, type checking, error formatting. FastAPI is like a canvas that comes with guidelines, pre-mixed colors, and a frame. You still paint whatever you want, but the tedious setup work is already handled.
+The Problem FastAPI Solves
+
+When you build an API with Flask (or most older frameworks), you spend a surprising amount of time on things that aren't your actual business logic:
+
+Validation — "Did the client send a valid email? Is the age field actually a number? Is the name too long?" In Flask, you write this validation code by hand for every endpoint. It's repetitive, error-prone, and boring.
+
+Documentation — You build an API with 20 endpoints. Now someone needs to use it. They need to know what each endpoint expects, what it returns, and what errors are possible. In Flask, you write this documentation separately — and it immediately starts drifting out of sync with your actual code.
+
+Type safety — Python is dynamically typed, which means your function can receive anything. A user_id parameter might be a string, an integer, or a list — Python doesn't care until something crashes. In Flask, you discover type errors at runtime, often in production.
+
+Performance — Traditional Flask handles one request at a time per worker. If your API calls an external service (a database, another API, an AI model), the worker just… waits. It can't handle other requests while waiting.
+
+FastAPI solves all four of these problems out of the box.
+What Makes FastAPI Different
+1. Automatic Validation with Pydantic
+
+FastAPI uses Pydantic (a Python library you'll learn in-depth in the next lesson) to validate incoming data automatically. Instead of writing validation code, you describe what valid data looks like:
+# Flask approach — manual validation
+@app.route("/users", methods=["POST"])
+def create_user():
+    data = request.get_json()
+    if not data.get("name"):
+        return {"error": "name is required"}, 400
+    if not data.get("email"):
+        return {"error": "email is required"}, 400
+    if not isinstance(data.get("age"), int):
+        return {"error": "age must be an integer"}, 400
+    # ... more validation ...
+    # Now actually create the user
+
+# FastAPI approach — declarative validation
+@app.post("/users")
+def create_user(user: UserCreate):  # Pydantic validates automatically
+    # If we get here, the data is guaranteed valid
+    # Just create the user
+
+If someone sends bad data to the FastAPI endpoint, they get a detailed error response automatically — you don't write a single line of validation code.
+2. Auto-Generated Documentation
+
+The moment you define an endpoint in FastAPI, it appears in interactive documentation. FastAPI generates two documentation interfaces automatically:
+
+Swagger UI (at /docs) — An interactive page where you can see all your endpoints, their parameters, their expected request bodies, and their response formats. You can even make live API calls directly from the browser.
+
+ReDoc (at /redoc) — A cleaner, read-only documentation page that's great for sharing with other developers or teams.
+
+This documentation is always in sync with your code because it's generated from your code. Change an endpoint, and the docs update automatically.
+3. Async Support
+
+FastAPI is built on top of Starlette (an async web framework) and supports Python's async/await syntax natively. This means your API can handle multiple requests concurrently:
+# Synchronous — the server waits for each step
+@app.get("/report")
+def get_report():
+    data = fetch_from_database()      # Wait...
+    analysis = call_ai_model(data)     # Wait more...
+    return {"report": analysis}
+
+# Asynchronous — the server can handle other requests while waiting
+@app.get("/report")
+async def get_report():
+    data = await fetch_from_database()     # Do other work while waiting
+    analysis = await call_ai_model(data)   # Do other work while waiting
+    return {"report": analysis}
+
+For AI applications — where you're regularly waiting for model responses, database queries, and external API calls — async support is a major performance advantage.
+4. Type Hints as Documentation
+
+FastAPI uses Python's type hint system as actual functional code, not just comments:
+@app.get("/users/{user_id}")
+def get_user(user_id: int):  # FastAPI automatically converts and validates
+    ...
+
+That : int type hint isn't just for readability — FastAPI uses it to automatically convert the URL path parameter to an integer, validate that it is indeed a number, and document it in the auto-generated docs.
+FastAPI vs. Flask — The Quick Comparison
+
+Feature
+    1. Data validation 
+    2. API documentation 
+    3. Async support 
+    4. Type checking 
+    5. Performance
+    6. Learning curve
+    7. Community
+Flask
+	1. Manual (write it yourself)
+    2. Manual (Swagger via extensions)
+    3. Limited(requires extensions)
+    4. None (runtime errors)
+    5. Good
+    6. Low
+    7. Massive (established)
+FastAPI
+    1. Automatic (Pydantic)
+    2. Auto-generated (built-in)
+    3. Native 
+    4. Built-in (type hints)
+    5. Excellent (async + Starlette)
+    6. Low-medium
+    7. Large and growing fast 
+
+Flask is still a fine framework — it's simpler for small projects and has a massive ecosystem. But for building modern APIs, especially AI-powered ones, FastAPI is the better choice. That's why this course teaches it.
+What You'll Build in This Module
+
+Over the next two weeks, you'll build a complete API from scratch. By the end, your API will have multiple endpoints handling CRUD operations, automatic data validation on every request, a database storing persistent data, user authentication with JWT tokens, error handling that returns clear consistent messages, background tasks that run without blocking responses, security protections (CORS, rate limiting, input sanitization), automated tests that verify everything works, and beautiful auto-generated documentation.
+
+This is production-quality API development. The skills transfer directly to building AI backends.
