@@ -1,0 +1,110 @@
+Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+    Organize a FastAPI project into a professional folder structure
+    Separate concerns using routers, models, and configuration files
+    Create and run a multi-file FastAPI application
+    Explain why project structure matters for maintainability and teamwork
+
+In the previous lesson, you put everything in a single main.py file. That works for a quick demo, but real applications have dozens of endpoints, multiple database models, configuration settings, and test files. Putting all of that in one file would be like writing a novel as a single paragraph — technically possible, but impossible to work with.
+
+Think of project structure like organizing a kitchen. You could dump all your utensils, spices, and pots into one drawer. You'd still be able to cook. But when you need the paprika during a dinner rush, you'll waste time digging through a mess. A well-organized kitchen has designated places for everything — and so does a well-organized codebase.
+The Standard FastAPI Project Layout
+
+Here's the structure you'll use throughout this module and in your capstone project:
+my-api/
+├── app/
+│   ├── __init__.py          ← Makes 'app' a Python package
+│   ├── main.py              ← FastAPI application entry point
+│   ├── config.py            ← Settings and environment variables
+│   ├── database.py          ← Database connection and session setup
+│   ├── models/              ← SQLAlchemy database models
+│   │   ├── __init__.py
+│   │   └── user.py
+│   ├── schemas/             ← Pydantic validation models
+│   │   ├── __init__.py
+│   │   └── user.py
+│   ├── routers/             ← API endpoint definitions
+│   │   ├── __init__.py
+│   │   └── users.py
+│   └── utils/               ← Helper functions
+│       ├── __init__.py
+│       └── security.py
+├── tests/
+│   ├── __init__.py
+│   ├── conftest.py
+│   └── test_users.py
+├── .env
+├── .gitignore
+├── requirements.txt
+└── README.md
+Why This Structure?
+
+Separation of concerns — Each file has one job. models/ defines your database tables. schemas/ defines your request/response shapes. routers/ defines your endpoints. When something breaks, you know exactly where to look.
+
+Scalability — Adding a new resource (say, "tasks") means adding models/task.py, schemas/task.py, and routers/tasks.py. You don't touch existing files. The pattern scales cleanly.
+
+Team collaboration — Two developers can work on different routers without creating merge conflicts. The structure makes parallel work possible.
+
+Testing — Tests live in their own directory and mirror the app structure. Easy to find, easy to run.
+Key Files Explained
+app/main.py — The Entry Point
+
+This is where your FastAPI application is created and your routers are connected:
+from fastapi import FastAPI
+from app.routers import users
+
+app = FastAPI(
+    title="My API",
+    description="A well-structured FastAPI application",
+    version="1.0.0"
+)
+
+app.include_router(users.router)
+
+The main.py file stays small. It creates the app, wires things together, and that's it.
+app/routers/ — Grouped Endpoints
+
+A router is a group of related endpoints:
+# app/routers/users.py
+from fastapi import APIRouter
+
+router = APIRouter(
+    prefix="/users",     # All routes start with /users
+    tags=["Users"]       # Groups them in the docs
+)
+
+@router.get("/")
+def list_users():
+    return [{"id": 1, "name": "Alice"}]
+
+@router.get("/{user_id}")
+def get_user(user_id: int):
+    return {"id": user_id, "name": "Alice"}
+
+The prefix="/users" means you define routes as / and /{user_id}, but they're served as /users/ and /users/{user_id}.
+app/config.py — Settings
+
+Hardcoding values directly in your code is a security risk. Configuration reads from environment variables:
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    database_url: str = "sqlite:///./app.db"
+    secret_key: str = "change-me-in-production"
+    debug: bool = True
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+app/models/ vs app/schemas/
+
+This distinction confuses many beginners, so let's be clear:
+
+Models (SQLAlchemy) define what your database tables look like. They describe how data is stored.
+
+Schemas (Pydantic) define what your API requests and responses look like. They describe how data is transferred.
+
+
+You often need both for the same resource. A database model might have a hashed password column, but your response schema would never include the password.
