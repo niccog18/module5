@@ -1,0 +1,148 @@
+Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+    Define Pydantic models to validate API request and response data
+    Use field types, optional fields, default values, and custom validators
+    Create separate schemas for create, update, and response operations
+    Explain how Pydantic's validation integrates with FastAPI's error responses
+
+
+
+In the real world, users send your API all sorts of garbage. A name field with 10,000 characters. An email address that's actually a phone number. A price of negative forty-seven. An age field containing the string "old."
+
+You have two choices: write hundreds of lines of if/else validation code checking every field on every endpoint, or use Pydantic to describe what valid data looks like and let it handle the checking for you.
+
+Pydantic is the single most important library in the FastAPI ecosystem. It's the reason FastAPI can automatically validate requests, generate documentation, and provide clear error messages. Understanding Pydantic deeply will make everything else in this module easier.
+
+Think of Pydantic like a bouncer at a club. You give the bouncer a list of rules (must have valid ID, must be on the guest list, no sneakers). Anyone who meets the rules gets in. Anyone who doesn't gets turned away with a specific explanation of which rule they broke. You don't personally check every person — the bouncer does it for you.
+Basic Pydantic Models
+
+A Pydantic model is a Python class that describes the shape of your data:
+from pydantic import BaseModel
+
+class UserCreate(BaseModel):
+    name: str
+    email: str
+    age: int
+
+This says: "Valid user data has a name (string), an email (string), and an age (integer)." Pydantic will:
+
+    Accept {"name": "Alice", "email": "alice@example.com", "age": 30} ✅
+    Reject {"name": "Alice", "email": "alice@example.com"} ❌ (missing age)
+    Reject {"name": "Alice", "email": "alice@example.com", "age": "thirty"} ❌ (age is not an integer)
+    Convert {"name": "Alice", "email": "alice@example.com", "age": "30"} ✅ (string "30" is auto-converted to integer 30)
+
+
+That last point is important: Pydantic tries to coerce data to the correct type when possible. The string "30" can be converted to the integer 30, so it's accepted. The string "thirty" cannot, so it's rejected.
+Optional Fields and Defaults
+
+Not every field is required every time. Pydantic handles this cleanly:
+from pydantic import BaseModel
+from typing import Optional
+
+class UserCreate(BaseModel):
+    name: str                          # Required — must be provided
+    email: str                         # Required
+    age: int                           # Required
+    bio: Optional[str] = None          # Optional — defaults to None
+    is_active: bool = True             # Optional — defaults to True
+    role: str = "user"                 # Optional — defaults to "user"
+
+
+Fields with defaults are optional in the request. Fields without defaults are required. If a client sends {"name": "Alice", "email": "a@b.com", "age": 30}, the bio will be None, is_active will be True, and role will be "user".
+Field Validation with Constraints
+
+Basic types aren't always enough. You might need a string between 1 and 100 characters, a number greater than zero, or an email in a valid format. Pydantic's Field function adds these constraints:
+from pydantic import BaseModel, Field, field_validator
+
+class ProductCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    price: float = Field(gt=0, description="Price must be greater than zero")
+    quantity: int = Field(ge=0, le=10000, description="Stock quantity")
+    category: str = Field(default="general", max_length=50)
+
+Constraint shortcuts:
+
+    gt — greater than
+    ge — greater than or equal to
+    lt — less than
+    le — less than or equal to
+    min_length / max_length — string length limits
+
+If someone sends {"name": "", "price": -5, "quantity": 999999}, Pydantic returns a detailed error listing every violated constraint — not just the first one. This is much more helpful than getting one error, fixing it, submitting again, getting another error, and so on.
+Custom Validators
+
+For validation logic that can't be expressed as a simple constraint, you write custom validators:
+from pydantic import BaseModel, field_validator
+
+class UserCreate(BaseModel):
+    name: str
+    email: str
+    password: str
+
+    @field_validator("email")
+    @classmethod
+    def email_must_contain_at(cls, v):
+        if "@" not in v:
+            raise ValueError("must be a valid email address")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_strength(cls, v):
+        if len(v) < 8:
+            raise ValueError("must be at least 8 characters")
+        if not any(c.isupper() for c in v):
+            raise ValueError("must contain at least one uppercase letter")
+        return v
+
+Custom validators run after type checking. The v parameter is the field's value, already converted to the correct type. If validation fails, raise ValueError with a message. If it passes, return the value (potentially transformed).
+Separate Schemas for Different Operations
+
+A critical pattern in real APIs: you need different schemas for creating, updating, and returning data.
+# What the client sends to CREATE a user
+class UserCreate(BaseModel):
+    name: str
+    email: str
+    password: str            # Client sends password
+
+# What the client sends to UPDATE a user (all fields optional)
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+
+# What the server sends BACK (never includes password)
+class UserResponse(BaseModel):
+    id: int                  # Server generates this
+    name: str
+    email: str
+    is_active: bool
+    created_at: str          # Server generates this
+
+
+Why separate schemas?
+
+    Create includes password — the user sets it during registration
+    Update makes everything optional — you might only change the name
+    Response includes id and created_at (server-generated) but never includes password
+
+
+This pattern protects your API. Even if a developer accidentally queries the full database record, the response schema filters out sensitive fields before sending the data to the client.
+How FastAPI Uses Pydantic
+
+When you use a Pydantic model as a function parameter, FastAPI automatically:
+
+    Reads the request body as JSON
+    Validates it against your schema
+    Returns a 422 error with detailed messages if validation fails
+    Passes the validated model to your function if everything checks out
+
+When you use response_model, FastAPI:
+
+    Filters the return data through your response schema
+    Removes any fields not in the schema (like passwords)
+    Documents the response shape in Swagger UI
+
+
+This two-way validation — incoming and outgoing — is what makes FastAPI APIs robust and self-documenting.
