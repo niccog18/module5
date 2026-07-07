@@ -1,0 +1,111 @@
+Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+    Define path parameters with type annotations and automatic validation
+    Define query parameters with defaults, optional values, and constraints
+    Choose when to use path parameters vs. query parameters
+    Combine both in a single endpoint for flexible data retrieval
+
+In Module 4, you learned that URLs carry information through path parameters and query parameters. Now you'll see how FastAPI makes handling both of them remarkably clean — with automatic type conversion, validation, and documentation.
+
+Remember the distinction from Module 4: path parameters identify a specific resource (/users/42), while query parameters filter, sort, or modify how you retrieve resources (/users?role=admin&sort=name). FastAPI treats both as first-class features, but the syntax for each is slightly different.
+Path Parameters
+
+A path parameter is a variable embedded in the URL path. In FastAPI, you define them with curly braces in the route and matching function parameters:
+@app.get("/users/{user_id}")
+def get_user(user_id: int):
+    return {"user_id": user_id}
+
+The type hint : int does three things simultaneously:
+
+    Converts the URL segment from a string to an integer
+    Validates that it's actually a number (rejects /users/abc with a 422 error)
+    Documents it in Swagger UI as an integer parameter
+
+You can have multiple path parameters:
+@app.get("/courses/{course_id}/lessons/{lesson_id}")
+def get_lesson(course_id: int, lesson_id: int):
+    return {"course": course_id, "lesson": lesson_id}
+Path Parameter Validation
+
+You can constrain path parameters using Path():
+from fastapi import Path
+
+@app.get("/items/{item_id}")
+def get_item(
+    item_id: int = Path(gt=0, description="The ID of the item to retrieve")
+):
+    return {"item_id": item_id}
+
+Now /items/0 and /items/-5 are rejected. The description shows up in the Swagger docs.
+Query Parameters
+
+Any function parameter that is not in the URL path is automatically treated as a query parameter:
+@app.get("/products")
+def list_products(
+    category: str = None,      # Optional — /products or /products?category=electronics
+    min_price: float = 0,      # Optional with default — /products?min_price=10
+    max_price: float = 99999,  # Optional with default
+    sort_by: str = "name"      # Optional with default
+):
+    return {
+        "category": category,
+        "price_range": [min_price, max_price],
+        "sort_by": sort_by
+    }
+
+Clients call this as: /products?category=electronics&min_price=50&sort_by=price
+
+Parameters with defaults are optional. Parameters without defaults are required:
+@app.get("/search")
+def search(q: str):  # No default — client MUST provide ?q=something
+    return {"query": q}
+
+Calling /search without ?q= gives a 422 error.
+Query Parameter Validation
+
+Use Query() for constraints:
+from fastapi import Query
+
+@app.get("/items")
+def list_items(
+    skip: int = Query(default=0, ge=0, description="Number of items to skip"),
+    limit: int = Query(default=20, ge=1, le=100, description="Max items to return"),
+    search: str = Query(default=None, min_length=1, max_length=100)
+):
+    return {"skip": skip, "limit": limit, "search": search}
+
+This ensures pagination parameters are sensible: you can't skip a negative number of items, and you can't request more than 100 items at once.
+When to Use Which
+
+The rule from Module 4 still applies:
+
+Path parameters for identifying resources — they're part of the resource's address:
+
+    /users/42 — user 42
+    /orders/abc123 — order abc123
+    /courses/5/lessons/3 — lesson 3 in course 5
+
+Query parameters for everything else — filtering, sorting, pagination, searching:
+
+    /users?role=admin — filter by role
+    /products?sort=price&order=desc — sort products
+    /items?page=3&per_page=20 — paginate results
+    /search?q=python+fastapi — search query
+
+If removing the parameter would give you a different resource, it's a path parameter. If removing it would give you the same resource with different formatting, it's a query parameter.
+Enum Parameters
+
+For parameters that should only accept specific values, use Python enums:
+from enum import Enum
+
+class SortOrder(str, Enum):
+    asc = "asc"
+    desc = "desc"
+
+@app.get("/items")
+def list_items(sort_order: SortOrder = SortOrder.asc):
+    return {"sort_order": sort_order}
+
+Swagger UI renders this as a dropdown, and any value other than "asc" or "desc" is automatically rejected.
