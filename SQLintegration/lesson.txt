@@ -1,0 +1,141 @@
+Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+    Connect a SQLAlchemy database to a FastAPI application
+    Use FastAPI's dependency injection system to manage database sessions
+    Explain the relationship between SQLAlchemy models and Pydantic schemas
+    Create endpoints that read from and write to a real database
+
+
+
+Up until now, your endpoints have stored data in Python lists — in-memory storage that vanishes the moment you restart the server. That's fine for learning, but useless for production. Real applications need persistent storage, and you already know how to use one: SQLAlchemy, from Module 3.
+
+This lesson connects the two worlds. You'll wire SQLAlchemy into your FastAPI project so your endpoints read from and write to a real database. The data persists between server restarts, and you get all the relational capabilities (joins, queries, relationships) you learned in Module 3.
+
+Think of it like this: in Module 3, you built a warehouse (the database) and learned how to organize and retrieve items. In the first half of Module 5, you built a storefront (the API). Now you're connecting the storefront to the warehouse so customers (API clients) can actually order things that exist.
+The Connection Architecture
+
+FastAPI doesn't include a database layer — it's intentionally modular. You bring your own database library, and SQLAlchemy is the standard choice. Here's how the pieces fit together:
+Client Request → FastAPI Endpoint → SQLAlchemy Session → Database
+                                         ↓
+                 Pydantic Schema ← SQLAlchemy Model ← Query Results
+
+    A request arrives at your FastAPI endpoint
+    FastAPI creates a SQLAlchemy session (a connection to the database)
+    Your endpoint code uses the session to query or modify data
+    SQLAlchemy returns model objects
+    FastAPI converts them through Pydantic schemas for the response
+    The session is closed automatically when the request finishes
+
+Setting Up the Database Connection
+
+The database connection lives in its own file:
+# app/database.py
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, DeclarativeBase
+
+# Database URL — SQLite for development, PostgreSQL for production
+DATABASE_URL = "sqlite:///./app.db"
+
+# Create the engine — the core interface to the database
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False}  # Needed for SQLite only
+)
+
+# Session factory — creates new sessions for each request
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Base class for all models
+class Base(DeclarativeBase):
+    pass
+
+
+You saw all of this in Module 3. The only new concept is how we'll inject the session into FastAPI endpoints.
+Dependency Injection: The Session Per Request Pattern
+
+FastAPI has a powerful dependency injection system. Instead of manually creating and closing database sessions in every endpoint, you define a dependency function that FastAPI calls automatically:
+# app/database.py (add this function)
+def get_db():
+    """Dependency that provides a database session per request."""
+    db = SessionLocal()
+    try:
+        yield db       # Give the session to the endpoint
+    finally:
+        db.close()     # Always close it when the request is done
+
+
+The yield keyword is the magic. It:
+
+    Creates a new session
+    Gives it to your endpoint function
+    Waits for the endpoint to finish
+    Closes the session — even if an error occurred
+
+
+This is the session per request pattern: every request gets its own database session, and it's guaranteed to be cleaned up afterward. No leaked connections, no forgotten closures.
+
+
+To use it in an endpoint:
+from fastapi import Depends
+from app.database import get_db
+from sqlalchemy.orm import Session
+
+@router.get("/users")
+def list_users(db: Session = Depends(get_db)):
+    # 'db' is a live database session, ready to use
+    users = db.query(User).all()
+    return users
+
+The Depends(get_db) tells FastAPI: "Before running this endpoint, call get_db() and pass the result as the db parameter." You never call get_db() yourself.
+Models vs. Schemas (Revisited)
+
+This is where the models/schemas distinction becomes concrete:
+# app/models/user.py — How data is STORED
+from sqlalchemy import Column, Integer, String, Boolean, DateTime
+from sqlalchemy.sql import func
+from app.database import Base
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    email = Column(String, unique=True, nullable=False)
+    hashed_password = Column(String, nullable=False)  # Stored but never exposed
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, server_default=func.now())
+# app/schemas/user.py — How data is TRANSFERRED
+from pydantic import BaseModel
+from typing import Optional
+
+class UserCreate(BaseModel):
+    name: str
+    email: str
+    password: str          # Client sends plain password
+
+class UserResponse(BaseModel):
+    id: int
+    name: str
+    email: str
+    is_active: bool
+    created_at: str        # Serialized for JSON
+
+    class Config:
+        from_attributes = True   # Allows Pydantic to read from SQLAlchemy model attributes
+
+
+The from_attributes = True setting (called orm_mode in Pydantic v1) is essential. Without it, Pydantic can't read data from SQLAlchemy model objects. With it, UserResponse.model_validate(db_user) or simply returning the model object works seamlessly.
+Creating Tables
+
+One more setup step — creating the actual database tables from your models:
+# app/main.py (add at the top, after imports)
+from app.database import engine, Base
+from app.models import user  # Import models so Base knows about them
+
+# Create tables on startup (development only — use migrations in production)
+Base.metadata.create_all(bind=engine)
+
+
+This creates the tables if they don't exist. For production, you'd use Alembic for migrations, but for learning and development, create_all() is sufficient.
