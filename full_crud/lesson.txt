@@ -1,0 +1,92 @@
+Learning Objectives
+------------------------------------------
+By the end of this lesson, you will be able to:
+
+    Implement all four CRUD operations (Create, Read, Update, Delete) with FastAPI and SQLAlchemy
+    Handle partial updates using PATCH with exclude_unset
+    Return appropriate HTTP status codes for each operation
+    Structure CRUD logic cleanly with consistent error handling
+
+You've built individual endpoints in the previous lessons — a POST here, a GET there. Now it's time to bring it all together into a complete CRUD implementation. This is the core skill of API development: every backend you build, whether it's a task manager, a social media platform, or an AI application, needs full CRUD.
+
+Think of CRUD like the four basic moves in chess. Individually, they're simple. But combining them effectively — knowing when to create, when to read, when to update, and when to delete — is what makes a complete player. After this lesson, you'll be able to build the data layer for any application.
+
+
+The CRUD → HTTP → Status Code Map
+------------------------------------------
+Here's the complete mapping you learned in Module 4, now applied to FastAPI:
+
+Operation
+	1. Create 
+    2. Read (one)
+    3. Read (many)
+    4. Update (full)
+    5. Update (partial)
+    6. Delete 
+HTTP Method
+	1. POST
+    2. GET 
+    3. GET 
+    4. PUT 
+    5. PATCH 
+    6. DELETE 
+Success Code
+	1. 201 Created
+    2. 200 OK
+    3. 200 OK 
+    4. 200 OK 
+    5. 200 OK 
+    6. 204 No Content 
+Description
+    1. New resource added to database
+    2. Return a single resource
+    3. Return a filtered, paginated list
+    4. Replace the entire resource
+    5. Modify specific fields only
+    6. Resource removed
+
+Every operation also needs error handling:
+
+    404 — Resource not found (for GET, PUT, PATCH, DELETE by ID)
+    422 — Invalid data (Pydantic handles this automatically)
+    409 — Conflict (e.g., duplicate email on create)
+
+
+The Full vs. Partial Update Distinction
+------------------------------------------
+This is where many beginners get confused. PUT and PATCH both update resources, but they work differently:
+
+PUT (Full Update) — The client sends a complete replacement. Every field is required. If you PUT a user, you must send name, email, age, etc. — even the ones you're not changing. The server replaces the entire record.
+
+PATCH (Partial Update) — The client sends only the fields that changed. If you PATCH a user with {"name": "New Name"}, only the name changes. Everything else stays the same.
+
+
+In practice, PATCH is more useful for most APIs. Clients rarely want to resend the entire object just to change one field. But PUT is simpler to reason about. Many APIs implement PATCH; some implement both.
+
+
+Structuring CRUD for Consistency
+------------------------------------------
+Professional APIs follow a consistent pattern for every resource. Once you learn the pattern, applying it to a new resource is mechanical:
+@router.post("/",      response_model=Schema, status_code=201)   # Create
+@router.get("/",       response_model=list[Schema])              # Read many
+@router.get("/{id}",   response_model=Schema)                    # Read one
+@router.put("/{id}",   response_model=Schema)                    # Full update
+@router.patch("/{id}", response_model=Schema)                    # Partial update
+@router.delete("/{id}", status_code=204)                         # Delete
+
+
+Every resource in your API follows this same six-endpoint pattern. The only things that change are the model, the schemas, and any resource-specific business logic.
+
+
+The Helper Function Pattern
+------------------------------------------
+Rather than repeating the "find by ID or 404" logic in every endpoint, extract it into a helper:
+def get_resource_or_404(db: Session, model, resource_id: int, name: str = "Resource"):
+    """Fetch a resource by ID or raise a 404 error."""
+    resource = db.query(model).filter(model.id == resource_id).first()
+    if not resource:
+        raise HTTPException(status_code=404, detail=f"{name} not found")
+    return resource
+
+
+This eliminates duplication and ensures consistent error messages across your entire API.
