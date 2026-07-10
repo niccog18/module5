@@ -1,0 +1,160 @@
+Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+    Use FastAPI's built-in HTTPException for common error scenarios
+    Create custom exception classes for domain-specific errors
+    Register global exception handlers to standardize error response format
+    Return consistent, informative error responses across your entire API
+
+When something goes wrong in your API — and something always goes wrong — the error response matters as much as the success response. A raw stack trace tells the client nothing useful. A generic "Internal Server Error" is only slightly better. A well-crafted error response tells the client exactly what went wrong, why, and what they can do about it.
+
+Think of error handling like a doctor's diagnosis. "Something's wrong" is useless. "You have a sinus infection, caused by bacteria, and here's the antibiotic" is actionable. Your API errors should be the diagnosis, not the shrug.
+
+
+FastAPI's Built-In HTTPException
+----------------------------------------
+You've already used HTTPException for 404 errors. It accepts a status code and a detail message:
+
+from fastapi import HTTPException
+
+@router.get("/users/{user_id}")
+def get_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=404,
+            detail="User not found"
+        )
+    return user
+
+
+The response to the client:
+{
+    "detail": "User not found"
+}
+
+
+This works, but as your API grows, you'll want more structure.
+
+
+Custom Exception Classes
+----------------------------------------
+Instead of scattering HTTPException with magic numbers throughout your code, define meaningful exception classes:
+# app/utils/exceptions.py
+
+class AppException(Exception):
+    """Base exception for our application."""
+    def __init__(self, detail: str, status_code: int = 400):
+        self.detail = detail
+        self.status_code = status_code
+
+class NotFoundException(AppException):
+    def __init__(self, resource: str, resource_id: int):
+        super().__init__(
+            detail=f"{resource} with id {resource_id} not found",
+            status_code=404
+        )
+
+class DuplicateException(AppException):
+    def __init__(self, resource: str, field: str, value: str):
+        super().__init__(
+            detail=f"{resource} with {field} '{value}' already exists",
+            status_code=409
+        )
+
+class ForbiddenException(AppException):
+    def __init__(self, detail: str = "You don't have permission to perform this action"):
+        super().__init__(detail=detail, status_code=403)
+
+Now your endpoint code reads like plain English:
+
+from app.utils.exceptions import NotFoundException, DuplicateException
+
+@router.get("/users/{user_id}")
+def get_user(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise NotFoundException("User", user_id)
+    return user
+
+
+Global Exception Handlers
+----------------------------------------
+Custom exceptions need to be caught and converted to HTTP responses. FastAPI lets you register global exception handlers:
+
+# app/main.py
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from app.utils.exceptions import AppException
+
+app = FastAPI()
+
+@app.exception_handler(AppException)
+async def app_exception_handler(request: Request, exc: AppException):
+    """Convert all AppException subclasses to JSON responses."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": True,
+            "detail": exc.detail,
+            "status_code": exc.status_code
+        }
+    )
+
+
+Every AppException (and its subclasses: NotFoundException, DuplicateException, etc.) is now automatically caught and converted to a consistent JSON response format:
+
+{
+    "error": true,
+    "detail": "User with id 42 not found",
+    "status_code": 404
+}
+
+
+This consistency makes life much easier for frontend developers consuming your API — they always know the error format.
+
+
+Catching Unexpected Errors
+----------------------------------------
+You should also catch unexpected errors so they don't expose internal details:
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Catch any unhandled exception and return a clean 500 response."""
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": True,
+            "detail": "An internal server error occurred",
+            "status_code": 500
+        }
+    )
+
+
+In development, you might want to include the actual error message. In production, never expose internal details — they could reveal database structure, file paths, or other information an attacker could exploit.
+
+
+Validation Error Customization
+----------------------------------------
+FastAPI's built-in 422 validation errors are detailed but verbose. You can customize their format too:
+
+from fastapi.exceptions import RequestValidationError
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Simplify Pydantic validation error format."""
+    errors = []
+    for error in exc.errors():
+        errors.append({
+            "field": " → ".join(str(loc) for loc in error["loc"]),
+            "message": error["msg"],
+            "type": error["type"]
+        })
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": True,
+            "detail": "Validation failed",
+            "errors": errors
+        }
+    )
