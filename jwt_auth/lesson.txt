@@ -1,0 +1,114 @@
+Learning Objectives
+---------------------------------------
+By the end of this lesson, you will be able to:
+
+    Implement user registration with password hashing
+    Build a login endpoint that issues JWT tokens
+    Create a dependency that extracts and validates JWT tokens from requests
+    Protect endpoints so only authenticated users can access them
+
+In Module 4, you learned the concept of JWT authentication: the client logs in, receives a token, and includes that token in every subsequent request. Now you'll implement it. By the end of this lesson, your API will have real authentication — users who can register, log in, and access protected resources.
+
+
+Think of JWT like a wristband at a music festival. You show your ticket (username and password) at the gate (login endpoint). They give you a wristband (JWT token). For the rest of the festival, you just flash the wristband to get into any stage (protected endpoint) — you don't show your ticket again. The wristband has an expiration (token expiry), and security can verify it's real without calling the ticket office (stateless verification).
+
+
+The Authentication Flow
+---------------------------------------
+1. Register:  POST /auth/register  →  Creates user with hashed password
+2. Login:     POST /auth/login     →  Validates credentials → Returns JWT token
+3. Use token: GET /users/me        →  Client sends token in Authorization header
+                                       →  Server validates token → Returns user data
+
+
+Three key principles:
+
+    Never store plain-text passwords. Passwords are hashed using bcrypt before storage. Even if the database is compromised, the passwords can't be recovered.
+    Tokens are stateless. The server doesn't store sessions. The token itself contains the user's identity, and the server can verify it using a secret key. This scales beautifully — any server in a cluster can validate any token.
+    Tokens expire. A token issued today shouldn't work forever. Setting an expiration (typically 30 minutes to 24 hours) limits the damage if a token is stolen.
+
+
+Password Hashing
+---------------------------------------
+Never, ever, ever store passwords as plain text. Use bcrypt hashing:
+# app/utils/security.py
+from passlib.context import CryptContext
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str) -> str:
+    """Hash a password for storage."""
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """Verify a plain password against its hash."""
+    return pwd_context.verify(plain_password, hashed_password)
+
+hash_password("mysecret") produces something like $2b$12$LJ3m4ys... — a one-way hash that can't be reversed. verify_password checks if a plain password matches a hash without ever decrypting the hash.
+
+
+Creating JWT Tokens
+---------------------------------------
+# app/utils/security.py (add to the same file)
+from jose import JWTError, jwt
+from datetime import datetime, timedelta
+
+SECRET_KEY = "your-secret-key-change-in-production"  # Use env variable in production
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+def create_access_token(data: dict) -> str:
+    """Create a JWT token with an expiration time."""
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def decode_access_token(token: str) -> dict:
+    """Decode and validate a JWT token."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except JWTError:
+        return None
+
+The token encodes the user's identity (typically their ID or email) plus an expiration timestamp. The server signs it with a secret key. Anyone with the secret key can verify the token is legitimate and hasn't been tampered with.
+
+The get_current_user Dependency
+---------------------------------------
+This is the piece that ties everything together. It's a FastAPI dependency that extracts the token from the request, decodes it, and returns the current user:
+# app/utils/security.py (add to the same file)
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    """Dependency: extract and validate JWT, return the current user."""
+    payload = decode_access_token(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    user_id = payload.get("sub")
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+OAuth2PasswordBearer(tokenUrl="/auth/login") tells FastAPI (and Swagger UI) that authentication uses a bearer token and the login endpoint is at /auth/login. Swagger UI will show a lock icon and allow you to authenticate directly from the docs.
+
+
+Protecting Endpoints
+---------------------------------------
+Add get_current_user as a dependency to any endpoint that requires authentication:
+@router.get("/me")
+def get_my_profile(current_user: User = Depends(get_current_user)):
+    """Return the authenticated user's profile."""
+    return current_user
+
+
+If the client sends a valid token, current_user contains the User object. If the token is missing, invalid, or expired, FastAPI returns a 401 before your code runs.
