@@ -1,0 +1,73 @@
+Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+    Explain what background tasks are and when to use them
+    Create background tasks that run after the response is sent
+    Pass parameters to background task functions
+    Identify common use cases for background tasks in API development
+
+Some operations should happen after you've already responded to the client. If a user registers and you want to send them a welcome email, should the client wait for the email server to respond? No. They should get their registration confirmation immediately, and the email can go out in the background.
+
+
+Think of it like ordering at a coffee shop. The barista takes your order, gives you a receipt, and tells you it'll be ready at the counter. You don't stand at the register watching them grind beans and steam milk. They processed your request (took the order), responded immediately (gave you the receipt), and do the slow work in the background (make the coffee).
+
+
+FastAPI has built-in support for exactly this pattern.
+How Background Tasks Work
+
+FastAPI provides a BackgroundTasks object that queues functions to run after the response is sent:
+from fastapi import BackgroundTasks
+
+@app.post("/register")
+def register_user(user: UserCreate, background_tasks: BackgroundTasks):
+    # 1. Create the user (fast — database insert)
+    new_user = create_user_in_db(user)
+
+    # 2. Queue the slow work for after the response
+    background_tasks.add_task(send_welcome_email, new_user.email, new_user.name)
+
+    # 3. Respond immediately — client doesn't wait for the email
+    return {"message": "User registered successfully", "id": new_user.id}
+
+
+The response goes back to the client. Then send_welcome_email runs. If the email takes 5 seconds, the client never knows or waits.
+When to Use Background Tasks
+
+Background tasks are right for work that:
+
+    Doesn't affect the response — the client doesn't need the result
+    Can be slightly delayed — a few seconds of lag is acceptable
+    Isn't critical — if it fails, the main operation still succeeded
+
+
+Common use cases: sending emails or notifications, writing audit logs, updating analytics or counters, generating reports or summaries, cleaning up temporary files, triggering external webhooks.
+
+
+Background tasks are not right for: work the client needs in the response (use async/await instead), long-running jobs that take minutes or hours (use a task queue like Celery), or critical operations that must not fail silently.
+Multiple Background Tasks
+
+You can queue multiple tasks — they run in order:
+@app.post("/orders")
+def create_order(order: OrderCreate, background_tasks: BackgroundTasks):
+    new_order = save_order(order)
+
+    background_tasks.add_task(send_confirmation_email, new_order)
+    background_tasks.add_task(notify_warehouse, new_order)
+    background_tasks.add_task(update_inventory_count, new_order.items)
+
+    return {"order_id": new_order.id, "status": "confirmed"}
+
+Background Tasks in Dependencies
+
+Background tasks can also be added from dependencies, not just endpoints:
+def log_request(background_tasks: BackgroundTasks):
+    """Dependency that logs every request in the background."""
+    background_tasks.add_task(write_to_audit_log, "request received")
+
+@app.get("/data")
+def get_data(background_tasks: BackgroundTasks = Depends(log_request)):
+    return {"data": "here"}
+
+
+This is useful for cross-cutting concerns like logging or analytics that apply to many endpoints.

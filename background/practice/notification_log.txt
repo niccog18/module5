@@ -1,0 +1,2 @@
+[2026-07-14 17:41:53] To: test1@email.com | Welcome Nicco! Your student record has been created.
+[2026-07-14 17:42:35] To: test3@email.com | Welcome Nayia! Your student record has been created.
