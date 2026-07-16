@@ -1,0 +1,104 @@
+Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+    Explain what CORS is and configure it for your FastAPI application
+    Identify common API security threats and their mitigations
+    Implement basic rate limiting to prevent abuse
+    Describe how SQLAlchemy's ORM prevents SQL injection and why raw queries are risky
+
+You can build the most feature-rich API in the world, but if it's insecure, none of that matters. Security isn't something you bolt on at the end — it's something you build in from the start. This lesson covers the essential security practices every API developer needs to know.
+
+
+Think of API security like home security. A front door lock (authentication — you just built this) is necessary but not sufficient. You also need to think about who can approach your house (CORS), how many times someone can ring the doorbell before it's suspicious (rate limiting), and whether someone could slip a lockpick through the mail slot (injection attacks).
+
+
+CORS — Cross-Origin Resource Sharing
+-----------------------------------------
+When your Streamlit frontend (running on localhost:8501) tries to call your FastAPI backend (running on localhost:8000), the browser blocks it by default. This is a security feature called the Same-Origin Policy: browsers prevent JavaScript from making requests to a different origin (domain, port, or protocol) than the one that served the page.
+
+CORS tells the browser which origins are allowed to make requests to your API.
+-----------------------------------------
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "<http://localhost:8501>",       # Your Streamlit app
+        "<http://localhost:3000>",       # A React frontend (if you have one)
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+In development, you might allow all origins (allow_origins=["*"]). In production, always list specific origins.
+
+
+SQL Injection Prevention
+-----------------------------------------
+SQL injection is one of the most common and dangerous web vulnerabilities. An attacker inserts malicious SQL into your application's queries:
+# ❌ DANGEROUS — raw SQL with string formatting
+@app.get("/users")
+def search_users(name: str, db: Session = Depends(get_db)):
+    result = db.execute(f"SELECT * FROM users WHERE name = '{name}'")
+    return result.fetchall()
+
+An attacker could send name='; DROP TABLE users; -- and delete your entire database.
+
+The fix: never use string formatting for SQL. Use the ORM:
+# ✅ SAFE — SQLAlchemy ORM (what you've been doing all along)
+@app.get("/users")
+def search_users(name: str, db: Session = Depends(get_db)):
+    users = db.query(User).filter(User.name == name).all()
+    return users
+
+SQLAlchemy automatically parameterizes the query. The user's input is treated as data, never as SQL code.
+
+
+If you must use raw SQL (rare), always use parameterized queries:
+# ✅ SAFE — parameterized raw SQL
+from sqlalchemy import text
+result = db.execute(text("SELECT * FROM users WHERE name = :name"), {"name": name})
+
+
+Rate Limiting
+-----------------------------------------
+Rate limiting prevents abuse by restricting how many requests a client can make in a given time period. A simple approach using the slowapi library:
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+limiter = Limiter(key_func=get_remote_address)
+
+@app.post("/auth/login")
+@limiter.limit("5/minute")
+def login(request: Request, credentials: LoginRequest, db: Session = Depends(get_db)):
+    # ... login logic
+
+
+Common rate limits: 
+
+    login endpoints at 5-10 per minute
+    general API endpoints at 60-100 per minute
+    AI/LLM endpoints at 5-10 per minute
+
+Input Validation as Security
+
+You've already been doing this with Pydantic, but let's explicitly frame it as a security practice:
+class CommentCreate(BaseModel):
+    content: str = Field(max_length=5000)  # Prevent absurdly large payloads
+    author_name: str = Field(max_length=100, pattern=r"^[a-zA-Z\\s]+$")  # Alphanumeric only
+
+
+max_length prevents clients from sending enormous payloads. pattern restricts input to expected characters. These aren't just data quality measures — they're security measures.
+
+
+Additional Security Practices
+-----------------------------------------
+    Never expose stack traces in production (your custom exception handler handles this)
+    Use HTTPS in production (handled at the deployment level)
+    Validate all inputs (Pydantic does this)
+    Hash passwords (you did this in the previous lesson)
+    Set token expiration (you did this too)
