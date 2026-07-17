@@ -1,0 +1,102 @@
+Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+    Explain why automated testing is essential for API development
+    Write API tests using FastAPI's TestClient and pytest
+    Create test fixtures for database sessions and authentication
+    Test success cases, error cases, and edge cases for your endpoints
+
+You've built an API with CRUD operations, authentication, validation, and error handling. How do you know it all works? Right now, you test manually in Swagger UI — click, type, check. That works when you have 3 endpoints. It becomes impossible when you have 30.
+
+
+Automated testing means writing code that tests your code. Instead of manually checking each endpoint every time you make a change, you run a command and get a report: 47 tests passed, 0 failed. Done. Confident. Ship it.
+
+
+Think of it like a pilot's pre-flight checklist. A pilot doesn't eyeball the plane and say "looks fine." They systematically check every critical system before takeoff. Your test suite is that checklist — it verifies every critical behavior before you deploy.
+Why Test?
+
+Confidence: When you change code, tests tell you immediately if you broke something else.
+
+Documentation: Tests show how your API is meant to be used. Reading a test tells you exactly what input to send and what output to expect.
+
+Speed: Running 50 tests takes seconds. Manually testing 50 scenarios takes an hour.
+
+Required by employers: Professional software teams expect test coverage. A portfolio project with tests stands out.
+FastAPI's TestClient
+
+FastAPI integrates with pytest through TestClient, which lets you make HTTP requests to your app without actually running the server:
+from fastapi.testclient import TestClient
+from app.main import app
+
+client = TestClient(app)
+
+def test_read_root():
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.json() == {"message": "Hello, FastAPI!"}
+
+TestClient makes real HTTP requests to your app, but in-process — no network, no server startup. It's fast and reliable.
+Anatomy of a Test
+
+Every test follows the Arrange-Act-Assert pattern:
+def test_create_book():
+    # ARRANGE — set up the data
+    book_data = {"title": "Python Crash Course", "author": "Eric Matthes", "price": 35.99}
+
+    # ACT — make the request
+    response = client.post("/books", json=book_data)
+
+    # ASSERT — check the results
+    assert response.status_code == 201
+    data = response.json()
+    assert data["title"] == "Python Crash Course"
+    assert data["author"] == "Eric Matthes"
+    assert "id" in data
+
+What to Test
+
+For every endpoint, test at least:
+
+    Happy path — Valid input, expected output
+    Validation errors — Invalid input, expect 422
+    Not found — Request a resource that doesn't exist, expect 404
+    Business logic — Edge cases specific to your domain
+    Authentication — Protected endpoints without a token, expect 401
+
+Test Fixtures with pytest
+
+Fixtures are reusable setup functions:
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from app.main import app
+from app.database import Base, get_db
+
+TEST_DATABASE_URL = "sqlite:///./test.db"
+engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def override_get_db():
+    db = TestSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+app.dependency_overrides[get_db] = override_get_db
+
+@pytest.fixture(autouse=True)
+def setup_database():
+    """Create tables before each test, drop them after."""
+    Base.metadata.create_all(bind=engine)
+    yield
+    Base.metadata.drop_all(bind=engine)
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+The setup_database fixture runs before and after every test. Each test gets a fresh database — no leftover data from previous tests.
