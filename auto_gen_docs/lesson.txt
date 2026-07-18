@@ -1,0 +1,104 @@
+Learning Objectives
+
+By the end of this lesson, you will be able to:
+
+    Customize FastAPI's auto-generated Swagger UI and ReDoc documentation
+    Add descriptions, examples, and tags to make documentation clear and useful
+    Define response models and error responses in the docs
+    Explain the OpenAPI specification and how FastAPI generates it
+
+You've been using Swagger UI throughout this module — clicking "Try it out," testing endpoints, checking response formats. But you may not have realized that this documentation is generated entirely from your code. Every type hint, Pydantic model, router tag, and docstring you write becomes part of the documentation automatically.
+
+
+This is one of FastAPI's killer features: your documentation is always accurate because it's always generated from the source of truth — your code. In this lesson, you'll learn to make that auto-generated documentation truly excellent.
+
+
+Think of it like the difference between a house with a floor plan and a house without one. Both houses exist, but only one lets someone new understand the layout without walking through every room. Good API documentation is the floor plan that lets other developers understand your API quickly.
+The OpenAPI Specification
+
+Behind Swagger UI and ReDoc is the OpenAPI specification — a JSON file that describes your entire API in a standardized format. FastAPI generates this file automatically at /openapi.json.
+
+This means your API documentation is portable — you can export the OpenAPI spec and import it into Postman, generate client libraries, or publish it on a documentation site.
+Customizing Your App's Metadata
+app = FastAPI(
+    title="Task Manager API",
+    description="""
+    A production-quality task management API built with FastAPI.
+
+    ## Features
+    * User registration and JWT authentication
+    * Full CRUD for tasks with filtering and pagination
+    * Background task processing
+    * Comprehensive error handling
+
+    ## Authentication
+    Most endpoints require a Bearer token. Register at `/auth/register`,
+    then use the token from `/auth/login` in the Authorize dialog.
+    """,
+    version="1.0.0",
+    contact={"name": "Your Name", "email": "you@example.com"},
+    license_info={"name": "MIT License"}
+)
+
+Documenting Endpoints
+Docstrings
+
+FastAPI uses your function docstrings as endpoint descriptions:
+@router.post("/", response_model=TaskResponse, status_code=201)
+def create_task(task: TaskCreate, db: Session = Depends(get_db)):
+    """
+    Create a new task.
+
+    - **title**: Required. The task name (1-200 characters).
+    - **description**: Optional. Detailed description.
+    - **priority**: Optional. One of: low, medium, high, critical. Defaults to medium.
+    """
+    ...
+
+Tags for Organization
+tags_metadata = [
+    {"name": "Authentication", "description": "Register, login, and manage tokens"},
+    {"name": "Tasks", "description": "Create and manage tasks"},
+    {"name": "Users", "description": "User profile management"},
+]
+
+app = FastAPI(title="Task Manager", openapi_tags=tags_metadata)
+
+Response Examples
+class TaskResponse(BaseModel):
+    id: int
+    title: str
+    priority: str
+    completed: bool
+
+    class Config:
+        from_attributes = True
+        json_schema_extra = {
+            "example": {
+                "id": 1,
+                "title": "Write documentation",
+                "priority": "high",
+                "completed": False
+            }
+        }
+
+Documenting Error Responses
+@router.get(
+    "/{task_id}",
+    response_model=TaskResponse,
+    responses={
+        404: {"description": "Task not found"},
+        401: {"description": "Not authenticated"},
+    }
+)
+def get_task(task_id: int, db: Session = Depends(get_db)):
+    """Get a specific task by its ID."""
+    ...
+
+Deprecating Endpoints
+@router.get("/tasks/all", deprecated=True)
+def list_all_tasks():
+    """Deprecated: Use GET /tasks instead."""
+    ...
+
+The endpoint still works but appears with a strikethrough in Swagger UI.
